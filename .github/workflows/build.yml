@@ -1,0 +1,85 @@
+name: Build Cupid Android 16 (SukiSU Ultra + SuSFS)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dọn dẹp và Cài đặt môi trường
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential flex g++-multilib gcc-multilib git gnupg gperf lib32ncurses5-dev lib32readline-dev lib32z1-dev liblz4-tool libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev libelf-dev pahole
+
+      - name: Kéo mã nguồn Kernel (Android 16 - bka)
+        run: |
+          git clone -b bka --depth 1 https://github.com/${{ github.repository }} kernel
+
+      - name: Tích hợp SukiSU Ultra (Nhánh builtin)
+        run: |
+          cd kernel
+          mkdir -p drivers/kernelsu
+          cd drivers/kernelsu
+          git init
+          git remote add origin https://github.com/SukiSU-Ultra/SukiSU-Ultra.git
+          git config core.sparseCheckout true
+          echo "kernel/*" >> .git/info/sparse-checkout
+          git pull origin builtin
+          mv kernel/* .
+          rm -rf kernel .git
+          cd ..
+          sed -i '/kernelsu/d' drivers/Makefile
+          sed -i '/kernelsu/d' drivers/Kconfig
+          echo "obj-y += kernelsu/" >> drivers/Makefile
+          echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
+
+      - name: Tích hợp SuSFS (Chuẩn GKI 5.10)
+        run: |
+          git clone -b gki-android12-5.10 --depth 1 https://gitlab.com/simonpunk/susfs4ksu.git susfs_tmp
+          cd kernel
+          # Chép file nguồn SuSFS
+          cp -r ../susfs_tmp/kernel_patches/fs/* fs/
+          cp -r ../susfs_tmp/kernel_patches/include/* include/
+          # Vá lõi VFS (Dòng lệnh bạn đã làm thành công trên Termux)
+          patch -p1 < ../susfs_tmp/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch
+          # Vá SukiSU để nhận diện SuSFS
+          cd drivers/kernelsu
+          patch -p1 < ../../../susfs_tmp/kernel_patches/KernelSU/*.patch || true
+
+      - name: Kích hoạt cấu hình Xiaomi 12 (Cupid)
+        run: |
+          cd kernel
+          # Bật flags quan trọng
+          echo "CONFIG_KSU=y" >> arch/arm64/configs/vendor/cupid_GKI.config
+          echo "CONFIG_KSU_SUSFS=y" >> arch/arm64/configs/vendor/cupid_GKI.config
+          echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> arch/arm64/configs/vendor/cupid_GKI.config
+
+      - name: Tải Toolchain Clang 18
+        run: |
+          mkdir toolchain
+          cd toolchain
+          wget https://github.com/llvm/llvm-project/releases/download/llvmorg-18.1.8/clang+llvm-18.1.8-x86_64-linux-gnu-ubuntu-18.04.tar.xz
+          tar -xf *.tar.xz
+
+      - name: BẮT ĐẦU BIÊN DỊCH (Nấu Kernel)
+        run: |
+          cd kernel
+          export PATH=$GITHUB_WORKSPACE/toolchain/*/bin:$PATH
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- LLVM=1 LLVM_IAS=1 LD=ld.lld O=out vendor/cupid_GKI.config
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- LLVM=1 LLVM_IAS=1 LD=ld.lld O=out -j$(nproc --all)
+
+      - name: Kiểm tra và Xuất xưởng
+        run: |
+          if [ -f kernel/out/arch/arm64/boot/Image ]; then
+            echo "Build thành công rực rỡ!"
+          else
+            echo "Lỗi: Không tìm thấy file Image!"
+            exit 1
+          fi
+
+      - name: Upload Kernel Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kernel-Cupid-Android16-SuSFS
+          path: kernel/out/arch/arm64/boot/Image
