@@ -7,16 +7,16 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Dọn dẹp và Cài đặt môi trường (Ubuntu 24.04 Optimized)
+      - name: Cài đặt môi trường
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential flex git gnupg gperf libelf-dev libncurses-dev libssl-dev libxml2-utils lzop python3 rsync schedtool squashfs-tools xsltproc zip zlib1g-dev pahole
 
-      - name: Kéo mã nguồn Kernel (Android 16 - bka)
+      - name: Kéo mã nguồn Kernel
         run: |
           git clone -b bka --depth 1 https://github.com/${{ github.repository }} kernel
 
-      - name: Tích hợp SukiSU Ultra (Nhánh builtin)
+      - name: Tích hợp SukiSU Ultra
         run: |
           cd kernel
           mkdir -p drivers/kernelsu
@@ -28,13 +28,15 @@ jobs:
           git pull origin builtin
           mv kernel/* .
           rm -rf kernel .git
-          cd ..
+          
+          # Quay lại gốc kernel để sửa file cấu hình
+          cd ../../
           sed -i '/kernelsu/d' drivers/Makefile
           sed -i '/kernelsu/d' drivers/Kconfig
           echo "obj-y += kernelsu/" >> drivers/Makefile
           echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
 
-      - name: Tích hợp SuSFS (Chuẩn GKI 5.10)
+      - name: Tích hợp SuSFS (GKI 5.10)
         run: |
           git clone -b gki-android12-5.10 --depth 1 https://gitlab.com/simonpunk/susfs4ksu.git susfs_tmp
           cd kernel
@@ -44,9 +46,10 @@ jobs:
           cd drivers/kernelsu
           patch -p1 < ../../../susfs_tmp/kernel_patches/KernelSU/*.patch || true
 
-      - name: Kích hoạt cấu hình Xiaomi 12 (Cupid)
+      - name: Kích hoạt cấu hình Xiaomi 12
         run: |
           cd kernel
+          # Chèn cấu hình vào file vendor cupid
           echo "CONFIG_KSU=y" >> arch/arm64/configs/vendor/cupid_GKI.config
           echo "CONFIG_KSU_SUSFS=y" >> arch/arm64/configs/vendor/cupid_GKI.config
           echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> arch/arm64/configs/vendor/cupid_GKI.config
@@ -58,19 +61,22 @@ jobs:
           wget https://github.com/llvm/llvm-project/releases/download/llvmorg-18.1.8/clang+llvm-18.1.8-x86_64-linux-gnu-ubuntu-18.04.tar.xz
           tar -xf *.tar.xz
 
-      - name: BẮT ĐẦU BIÊN DỊCH (Nấu Kernel)
+      - name: BẮT ĐẦU BIÊN DỊCH
         run: |
           cd kernel
           export PATH=$GITHUB_WORKSPACE/toolchain/*/bin:$PATH
+          # Thiết lập cấu hình
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- LLVM=1 LLVM_IAS=1 LD=ld.lld O=out vendor/cupid_GKI.config
+          # Nấu Kernel
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- LLVM=1 LLVM_IAS=1 LD=ld.lld O=out -j$(nproc --all)
 
       - name: Kiểm tra và Xuất xưởng
         run: |
           if [ -f kernel/out/arch/arm64/boot/Image ]; then
-            echo "Build thành công rực rỡ!"
+            echo "Build thành công!"
           else
-            echo "Lỗi: Không tìm thấy file Image!"
+            echo "Lỗi: Không tìm thấy Image tại kernel/out/arch/arm64/boot/Image"
+            find kernel/out -name "Image"
             exit 1
           fi
 
