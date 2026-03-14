@@ -19,7 +19,6 @@ jobs:
       - name: 3. Tải Toolchain Clang 18 (Link Chuẩn)
         run: |
           mkdir -p $GITHUB_WORKSPACE/toolchain
-          # Đã trả về đúng file ubuntu-18.04 của LLVM (Chạy hoàn hảo trên 22.04)
           wget https://github.com/llvm/llvm-project/releases/download/llvmorg-18.1.8/clang+llvm-18.1.8-x86_64-linux-gnu-ubuntu-18.04.tar.xz
           tar -xf *.tar.xz -C $GITHUB_WORKSPACE/toolchain --strip-components=1
           echo "$GITHUB_WORKSPACE/toolchain/bin" >> $GITHUB_PATH
@@ -29,18 +28,19 @@ jobs:
           cd kernel
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -
 
-      - name: 5. Khâu vá SuSFS Inline (Ghép nối hoàn hảo)
+      - name: 5. Khâu vá SuSFS Inline (Vào ĐÚNG nhà)
         run: |
           git clone -b gki-android12-5.10 --depth 1 https://gitlab.com/simonpunk/susfs4ksu.git susfs_tmp
           cd kernel
           cp -r ../susfs_tmp/kernel_patches/fs/* fs/
           cp -r ../susfs_tmp/kernel_patches/include/* include/
           
-          # Vá lõi hệ thống GKI 5.10
+          # 1. Vá lõi hệ thống GKI 5.10 (Đứng ở gốc kernel - Đã thành công)
           patch -p1 < ../susfs_tmp/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch
           
-          # Vá KernelSU bản chuẩn (Official)
-          patch -p1 < ../susfs_tmp/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch
+          # 2. CỰC KỲ QUAN TRỌNG: Phải di chuyển vào thư mục KernelSU vừa cài để vá
+          cd KernelSU
+          patch -p1 < ../../susfs_tmp/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch
 
       - name: 6. Kích hoạt tính năng tàng hình (Config)
         run: |
