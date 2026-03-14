@@ -1,82 +1,73 @@
-name: Build Cupid Android 16 (SukiSU Ultra + SuSFS)
+name: Build Cupid A16 - Official KSU + SuSFS Inline
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
-      - name: 1. Cài đặt môi trường & Fix thư viện
+      - name: 1. Cài đặt môi trường chuẩn (Fix Clang 18)
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential flex git gnupg gperf libelf-dev libncurses-dev libssl-dev libxml2-utils lzop python3 rsync schedtool squashfs-tools xsltproc zip zlib1g-dev pahole gcc-aarch64-linux-gnu
-          sudo ln -s /usr/lib/x86_64-linux-gnu/libtinfo.so.6 /usr/lib/x86_64-linux-gnu/libtinfo.so.5
+          sudo apt-get install -y bc bison build-essential flex git libelf-dev libncurses-dev libssl-dev libxml2-utils lzop python3 rsync schedtool squashfs-tools xsltproc zip zlib1g-dev pahole gcc-aarch64-linux-gnu libtinfo5
 
-      - name: 2. Kéo mã nguồn Kernel (bka)
+      - name: 2. Kéo mã nguồn Cupid (bka)
         run: |
           git clone -b bka --depth 1 https://github.com/${{ github.repository }} kernel
 
-      - name: 3. Cài đặt Toolchain Clang 18
+      - name: 3. Tải Toolchain Clang 18
         run: |
           mkdir -p $GITHUB_WORKSPACE/toolchain
-          wget https://github.com/llvm/llvm-project/releases/download/llvmorg-18.1.8/clang+llvm-18.1.8-x86_64-linux-gnu-ubuntu-18.04.tar.xz
+          wget https://github.com/llvm/llvm-project/releases/download/llvmorg-18.1.8/clang+llvm-18.1.8-x86_64-linux-gnu-ubuntu-22.04.tar.xz
           tar -xf *.tar.xz -C $GITHUB_WORKSPACE/toolchain --strip-components=1
           echo "$GITHUB_WORKSPACE/toolchain/bin" >> $GITHUB_PATH
 
-      - name: 4. Tích hợp SukiSU Ultra
+      - name: 4. Cài đặt Official KernelSU
         run: |
           cd kernel
-          mkdir -p drivers/kernelsu
-          cd drivers/kernelsu
-          git init && git remote add origin https://github.com/SukiSU-Ultra/SukiSU-Ultra.git
-          git config core.sparseCheckout true
-          echo "kernel/*" >> .git/info/sparse-checkout
-          git pull origin builtin
-          mv kernel/* . && rm -rf kernel .git
-          cd ../../
-          sed -i '/kernelsu/d' drivers/Makefile
-          sed -i '/kernelsu/d' drivers/Kconfig
-          echo "obj-y += kernelsu/" >> drivers/Makefile
-          echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
+          # Cài KSU bằng script chuẩn của tác giả, nó sẽ tự động cấu hình Makefile chuẩn xác nhất
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -
 
-      - name: 5. Tích hợp SuSFS (Patch Level Fixed)
+      - name: 5. Khâu vá SuSFS Inline (Ghép nối hoàn hảo)
         run: |
           git clone -b gki-android12-5.10 --depth 1 https://gitlab.com/simonpunk/susfs4ksu.git susfs_tmp
           cd kernel
+          # Copy mã nguồn tàng hình
           cp -r ../susfs_tmp/kernel_patches/fs/* fs/
           cp -r ../susfs_tmp/kernel_patches/include/* include/
-          # Vá lõi GKI (-p1 là chuẩn cho gốc kernel)
+          
+          # 1. Vá lõi hệ thống GKI 5.10
           patch -p1 < ../susfs_tmp/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch
-          # Vá SukiSU (-p2 để khớp cấu trúc SukiSU Ultra)
-          cd drivers/kernelsu
-          patch -p2 < ../../../susfs_tmp/kernel_patches/KernelSU/*.patch || echo "Patch skipped or failed but continuing..."
+          
+          # 2. Vá KernelSU để đạt độ Inline (Lần này sẽ khớp 100% vì đúng bản gốc)
+          patch -p1 < ../susfs_tmp/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch
 
-      - name: 6. Kích hoạt Config Xiaomi 12
+      - name: 6. Kích hoạt tính năng tàng hình (Config)
         run: |
           cd kernel
           echo "CONFIG_KSU=y" >> arch/arm64/configs/vendor/cupid_GKI.config
           echo "CONFIG_KSU_SUSFS=y" >> arch/arm64/configs/vendor/cupid_GKI.config
           echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> arch/arm64/configs/vendor/cupid_GKI.config
 
-      - name: 7. BIÊN DỊCH KERNEL (Full LLVM Mode)
+      - name: 7. BẮT ĐẦU NẤU KERNEL
         run: |
           cd kernel
           mkdir -p out
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- LLVM=1 LLVM_IAS=1 LD=ld.lld AR=llvm-ar NM=llvm-nm STRIP=llvm-strip OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump O=out vendor/cupid_GKI.config
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- LLVM=1 LLVM_IAS=1 LD=ld.lld AR=llvm-ar NM=llvm-nm STRIP=llvm-strip OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump O=out -j$(nproc --all)
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 LD=ld.lld O=out vendor/cupid_GKI.config
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 LD=ld.lld O=out -j$(nproc --all)
 
-      - name: 8. Kiểm tra và Đóng gói
+      - name: 8. Kiểm tra chất lượng
         run: |
           if [ -f kernel/out/arch/arm64/boot/Image ]; then
-            echo "Thành công!"
+            echo "✅ Xuất xưởng thành công!"
           else
-            find kernel/out -name "Image"
+            echo "❌ Lỗi: Không tìm thấy Image"
             exit 1
           fi
 
-      - name: 9. Upload Artifact
+      - name: 9. Upload Kernel Image
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel-Cupid-Final-A16
+          name: Kernel-Cupid-A16-OfficialKSU-SuSFS-Inline
           path: kernel/out/arch/arm64/boot/Image
