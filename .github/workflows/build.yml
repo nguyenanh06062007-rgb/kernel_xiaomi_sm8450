@@ -7,14 +7,22 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Cài đặt môi trường
+      - name: Cài đặt môi trường (Bổ sung Cross-Compiler)
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential flex git gnupg gperf libelf-dev libncurses-dev libssl-dev libxml2-utils lzop python3 rsync schedtool squashfs-tools xsltproc zip zlib1g-dev pahole
+          sudo apt-get install -y bc bison build-essential flex git gnupg gperf libelf-dev libncurses-dev libssl-dev libxml2-utils lzop python3 rsync schedtool squashfs-tools xsltproc zip zlib1g-dev pahole gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 
       - name: Kéo mã nguồn Kernel
         run: |
           git clone -b bka --depth 1 https://github.com/${{ github.repository }} kernel
+
+      - name: Tải Toolchain Clang 18 (Cố định PATH)
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/toolchain
+          wget https://github.com/llvm/llvm-project/releases/download/llvmorg-18.1.8/clang+llvm-18.1.8-x86_64-linux-gnu-ubuntu-18.04.tar.xz
+          tar -xf *.tar.xz -C $GITHUB_WORKSPACE/toolchain --strip-components=1
+          # Lệnh quan trọng nhất: Ép GitHub ghi nhớ đường dẫn bin
+          echo "$GITHUB_WORKSPACE/toolchain/bin" >> $GITHUB_PATH
 
       - name: Tích hợp SukiSU Ultra
         run: |
@@ -29,7 +37,6 @@ jobs:
           mv kernel/* .
           rm -rf kernel .git
           
-          # Quay lại gốc kernel để sửa file cấu hình
           cd ../../
           sed -i '/kernelsu/d' drivers/Makefile
           sed -i '/kernelsu/d' drivers/Kconfig
@@ -49,25 +56,15 @@ jobs:
       - name: Kích hoạt cấu hình Xiaomi 12
         run: |
           cd kernel
-          # Chèn cấu hình vào file vendor cupid
           echo "CONFIG_KSU=y" >> arch/arm64/configs/vendor/cupid_GKI.config
           echo "CONFIG_KSU_SUSFS=y" >> arch/arm64/configs/vendor/cupid_GKI.config
           echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> arch/arm64/configs/vendor/cupid_GKI.config
 
-      - name: Tải Toolchain Clang 18
-        run: |
-          mkdir toolchain
-          cd toolchain
-          wget https://github.com/llvm/llvm-project/releases/download/llvmorg-18.1.8/clang+llvm-18.1.8-x86_64-linux-gnu-ubuntu-18.04.tar.xz
-          tar -xf *.tar.xz
-
       - name: BẮT ĐẦU BIÊN DỊCH
         run: |
           cd kernel
-          export PATH=$GITHUB_WORKSPACE/toolchain/*/bin:$PATH
-          # Thiết lập cấu hình
+          # Không cần export PATH nữa vì GitHub đã ghi nhớ ở bước trên
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- LLVM=1 LLVM_IAS=1 LD=ld.lld O=out vendor/cupid_GKI.config
-          # Nấu Kernel
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- LLVM=1 LLVM_IAS=1 LD=ld.lld O=out -j$(nproc --all)
 
       - name: Kiểm tra và Xuất xưởng
@@ -75,8 +72,8 @@ jobs:
           if [ -f kernel/out/arch/arm64/boot/Image ]; then
             echo "Build thành công!"
           else
-            echo "Lỗi: Không tìm thấy Image tại kernel/out/arch/arm64/boot/Image"
-            find kernel/out -name "Image"
+            echo "Lỗi: Không tìm thấy Image tại out/arch/arm64/boot/Image"
+            find kernel/out -name "Image" || true
             exit 1
           fi
 
