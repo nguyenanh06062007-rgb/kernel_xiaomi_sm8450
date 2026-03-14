@@ -7,10 +7,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Dọn dẹp và Cài đặt môi trường
+      - name: Dọn dẹp và Cài đặt môi trường (Ubuntu 24.04 Optimized)
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential flex g++-multilib gcc-multilib git gnupg gperf lib32ncurses5-dev lib32readline-dev lib32z1-dev liblz4-tool libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev libelf-dev pahole
+          sudo apt-get install -y bc bison build-essential flex git gnupg gperf libelf-dev libncurses-dev libssl-dev libxml2-utils lzop python3 rsync schedtool squashfs-tools xsltproc zip zlib1g-dev pahole
 
       - name: Kéo mã nguồn Kernel (Android 16 - bka)
         run: |
@@ -38,19 +38,15 @@ jobs:
         run: |
           git clone -b gki-android12-5.10 --depth 1 https://gitlab.com/simonpunk/susfs4ksu.git susfs_tmp
           cd kernel
-          # Chép file nguồn SuSFS
           cp -r ../susfs_tmp/kernel_patches/fs/* fs/
           cp -r ../susfs_tmp/kernel_patches/include/* include/
-          # Vá lõi VFS (Dòng lệnh bạn đã làm thành công trên Termux)
           patch -p1 < ../susfs_tmp/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch
-          # Vá SukiSU để nhận diện SuSFS
           cd drivers/kernelsu
           patch -p1 < ../../../susfs_tmp/kernel_patches/KernelSU/*.patch || true
 
       - name: Kích hoạt cấu hình Xiaomi 12 (Cupid)
         run: |
           cd kernel
-          # Bật flags quan trọng
           echo "CONFIG_KSU=y" >> arch/arm64/configs/vendor/cupid_GKI.config
           echo "CONFIG_KSU_SUSFS=y" >> arch/arm64/configs/vendor/cupid_GKI.config
           echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> arch/arm64/configs/vendor/cupid_GKI.config
