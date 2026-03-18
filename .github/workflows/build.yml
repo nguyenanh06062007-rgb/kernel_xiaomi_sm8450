@@ -1,72 +1,46 @@
-name: Build Cupid A16 - Official KSU + SuSFS Inline
-
-on:
-  workflow_dispatch:
+name: Build Cupid Kernel SUSFS Inline
+on: [workflow_dispatch]
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
-      - name: 1. Cài đặt môi trường chuẩn
+      - name: Checkout Kernel Source
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Setup Build Environment
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential flex git libelf-dev libncurses-dev libssl-dev libxml2-utils lzop python3 rsync schedtool squashfs-tools xsltproc zip zlib1g-dev pahole gcc-aarch64-linux-gnu libtinfo5
+          sudo apt-get install -y bc build-essential flex bison lld llvm clang
 
-      - name: 2. Kéo mã nguồn Cupid (bka)
+      - name: Integrate SukiSU Ultra
         run: |
-          git clone -b bka --depth 1 https://github.com/${{ github.repository }} kernel
+          git clone https://github.com/SukiSU-Ultra/SukiSU-Ultra.git drivers/sukisu
+          echo "obj-y += sukisu/" >> drivers/Makefile
+          # Tự động chèn config vào defconfig của cupid
+          echo "CONFIG_SUKISU=y" >> arch/arm64/configs/vendor/cupid_defconfig
+          echo "CONFIG_KSU_SUSFS=y" >> arch/arm64/configs/vendor/cupid_defconfig
+          echo "CONFIG_KSU_SUSFS_INLINE_HOOK=y" >> arch/arm64/configs/vendor/cupid_defconfig
 
-      - name: 3. Tải Toolchain Clang 18 (Link Chuẩn)
+      - name: Compile Kernel
         run: |
-          mkdir -p $GITHUB_WORKSPACE/toolchain
-          wget https://github.com/llvm/llvm-project/releases/download/llvmorg-18.1.8/clang+llvm-18.1.8-x86_64-linux-gnu-ubuntu-18.04.tar.xz
-          tar -xf *.tar.xz -C $GITHUB_WORKSPACE/toolchain --strip-components=1
-          echo "$GITHUB_WORKSPACE/toolchain/bin" >> $GITHUB_PATH
+          make -j$(nproc) O=out ARCH=arm64 vendor/cupid_defconfig
+          make -j$(nproc) O=out ARCH=arm64 \
+            CC=clang \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-android- \
+            CROSS_COMPILE_ARM32=arm-linux-androideabi-
 
-      - name: 4. Cài đặt Official KernelSU
+      - name: Package with AnyKernel3
         run: |
-          cd kernel
-          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -
+          git clone https://github.com/osm0sis/AnyKernel3.git
+          cp out/arch/arm64/boot/Image AnyKernel3/
+          cd AnyKernel3 && zip -r ../cupid-kernel-sukisu-inline.zip ./*
 
-      - name: 5. Khâu vá SuSFS Inline (Vào ĐÚNG nhà)
-        run: |
-          git clone -b gki-android12-5.10 --depth 1 https://gitlab.com/simonpunk/susfs4ksu.git susfs_tmp
-          cd kernel
-          cp -r ../susfs_tmp/kernel_patches/fs/* fs/
-          cp -r ../susfs_tmp/kernel_patches/include/* include/
-          
-          # 1. Vá lõi hệ thống GKI 5.10 (Đứng ở gốc kernel - Đã thành công)
-          patch -p1 < ../susfs_tmp/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch
-          
-          # 2. CỰC KỲ QUAN TRỌNG: Phải di chuyển vào thư mục KernelSU vừa cài để vá
-          cd KernelSU
-          patch -p1 < ../../susfs_tmp/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch
-
-      - name: 6. Kích hoạt tính năng tàng hình (Config)
-        run: |
-          cd kernel
-          echo "CONFIG_KSU=y" >> arch/arm64/configs/vendor/cupid_GKI.config
-          echo "CONFIG_KSU_SUSFS=y" >> arch/arm64/configs/vendor/cupid_GKI.config
-          echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> arch/arm64/configs/vendor/cupid_GKI.config
-
-      - name: 7. BẮT ĐẦU NẤU KERNEL
-        run: |
-          cd kernel
-          mkdir -p out
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 LD=ld.lld O=out vendor/cupid_GKI.config
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 LD=ld.lld O=out -j$(nproc --all)
-
-      - name: 8. Kiểm tra chất lượng
-        run: |
-          if [ -f kernel/out/arch/arm64/boot/Image ]; then
-            echo "✅ Xuất xưởng thành công!"
-          else
-            echo "❌ Lỗi: Không tìm thấy Image"
-            exit 1
-          fi
-
-      - name: 9. Upload Kernel Image
+      - name: Upload Result
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel-Cupid-A16-OfficialKSU-SuSFS-Inline
-          path: kernel/out/arch/arm64/boot/Image
+          name: Cupid-Kernel-Zip
+          path: cupid-kernel-sukisu-inline.zip
